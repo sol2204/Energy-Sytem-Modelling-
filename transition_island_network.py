@@ -3,6 +3,7 @@ import pypsa as ps
 import matplotlib.pyplot as plt
 
 network_old = ps.Network()
+
 emission_factor = {
     "Coal Plant": 0.9,
     "Gas Plant": 0.4,
@@ -19,23 +20,29 @@ network_old.add("Generator", "Coal Plant",
                 bus="Central_Bus",
                 p_nom=200,
                 marginal_cost=80,
+                emission_factor=emission_factor["Coal Plant"],
                 carrier="coal",)
 
 network_old.add("Generator", "Gas Plant",
                 bus="Central_Bus",
                 p_nom=150,
                 marginal_cost=70,
+                emission_factor=emission_factor["Gas Plant"],
                 carrier="gas",)
 
 hourly_demand = [180, 170, 165, 160, 160, 165, 170, 180, 190, 200,
                  210, 220, 230, 240, 245, 250, 245, 240, 230, 220,
                  210, 200, 190, 185,]
 
+
 network_old.add("Load", "Demand", bus="Central_Bus", p_set=hourly_demand)
 
-network_old.optimize()
+print(network_old.buses.index)
+print(network_old.generators[["bus"]])
 
-network_new = ps.Network()
+network_old.optimize() #LOPF
+
+network_new = ps.Network() #new network for transition
 
 snaptshots = pd.date_range("2024-01-01 00:00:00", "2024-01-01 23:00:00", freq="h")
 network_new.set_snapshots(snapshots)
@@ -50,10 +57,12 @@ wind_availability = [0.6, 0.7, 0.8, 0.6, 0.5, 0.4, 0.6, 0.7, 0.8,
                      0.7, 0.6, 0.5, 0.4, 0.5, 0.6, 0.7, 0.8, 0.7,
                      0.6, 0.5, 0.4, 0.5, 0.6, 0.7]
 
+
 network_new.add("Generator", "Gas Plant",
                 bus="Central_Bus",
                 p_nom=150,
                 marginal_cost=200,
+                emission_factor=emission_factor["Gas Plant"],
                 carrier="gas")
 
 network_new.add("Generator", "Solar Plant",
@@ -62,6 +71,7 @@ network_new.add("Generator", "Solar Plant",
                 capital_cost=600,
                 p_max_pu=solar_availability,
                 marginal_cost=0,
+                emission_factor=emission_factor["Solar Plant"],
                 carrier="solar")
 
 network_new.add("Generator", "Wind Plant",
@@ -72,22 +82,16 @@ network_new.add("Generator", "Wind Plant",
                 p_nom_extendable=True,
                 p_max_pu=wind_availability,
                 marginal_cost=0,
+                emission_factor=emission_factor["Wind Plant"],
                 carrier="wind")
-
-network_new.add("Generator", "Solar_example",
-                bus="Central_Bus",
-                p_nom=150,
-                marginal_cost=0,
-                carrier="solar")
 
 network_new.add("Load", "Demand", bus="Central_Bus", p_set=hourly_demand)
 
 
-
-network_new.optimize()
-breakpoint()
+network_new.optimize() #LOPF
 print(f"Total cost opex + capex: {network_new.objective} USD")
 print(f"Total cost of old system: {network_old.objective} USD")
+print(f"Time to pay off investment: {network_new.objective / network_old.objective:.2f} days")
 print(f"optimized solar plant capacity: {network_new.generators.at['Solar Plant', 'p_nom_opt']:.2f} MW")
 
 print(f"Difference in cost between old and new system: {network_new.objective - network_old.objective} USD")
@@ -149,3 +153,19 @@ plot_dispatch_subplots(
     network_new,
     title="Generation dispatch: old vs new system"
 )
+
+#function to calculate total emissions from the network
+def calculate_total_emissions(network):
+    emissions = 0 
+    for generator, generator_data in network.generators.iterrows():
+        generation = network.generators_t.p[generator]
+        emissions_factor = generator_data["emission_factor"]
+        gen_emissions = sum(generation * emissions_factor)
+        emissions += gen_emissions
+    return emissions
+
+old_emissions = calculate_total_emissions(network_old)
+print(f"Total emissions from old system: {old_emissions} kgCO2")
+new_emissions = calculate_total_emissions(network_new)
+print(f"Total emissions from new system: {new_emissions} kgCO2")
+print(f"Percentage reduction in emissions: {(old_emissions - new_emissions) / old_emissions * 100:.2f}%")
